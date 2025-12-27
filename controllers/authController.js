@@ -1,53 +1,26 @@
-const bcrypt = require("bcryptjs");
-const User = require("../models/userModel");
-const generateToken = require("../utils/generateToken");
+const bcrypt = require('bcrypt');
+const User = require('../models/userModel');
+const generateToken = require('../utils/generateToken');
 
-exports.register = async (req, res, next) => {
-  try {
-    const { name, email, password, role } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ message: "Missing fields" });
-
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(400).json({ message: "User already exists" });
-
-    const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(password, salt);
-
-    const user = await User.create({ name, email, password: hashed, role });
-    const token = generateToken(user);
-
-    res.status(201).json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      token,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.login = async (req, res, next) => {
+exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ message: "Missing fields" });
+    if (!email || !password) return res.status(400).json({ status: 'error', message: 'Email and password are required' });
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    // password is select:false in schema so select it explicitly
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    if (!user) return res.status(401).json({ status: 'error', message: 'Invalid email or password' });
 
-    const matched = await bcrypt.compare(password, user.password);
-    if (!matched) return res.status(401).json({ message: "Invalid credentials" });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ status: 'error', message: 'Invalid email or password' });
 
-    const token = generateToken(user);
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      token,
-    });
+    const token = generateToken({ id: user._id.toString(), role: user.role });
+
+    const safeUser = await User.findById(user._id).select('-password');
+
+    res.json({ status: 'success', token, user: safeUser });
   } catch (err) {
-    next(err);
+    console.error('authController.login error:', err);
+    res.status(500).json({ status: 'error', message: 'Server error during login' });
   }
 };
